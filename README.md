@@ -2,4 +2,7 @@
 
 simple code about fluid dynamics
 
-![](vor.gif)
+![](plot/vor.gif)
+
+
+![](plot/kh.gif)
