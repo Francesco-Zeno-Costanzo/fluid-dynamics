@@ -73,12 +73,25 @@ vx, vy : matrix
 P : matrix
     pressure field
 """
-function old_quantities(M::Matrix, Px::Matrix, Py::Matrix, E::Matrix, g::Float64, vol::Float64, rho::Matrix, vx::Matrix, vy::Matrix, P::Matrix)
+function old_quantities(M::Matrix, Px::Matrix, Py::Matrix, E::Matrix, g::Float64, vol::Float64, rho::Matrix, vx::Matrix, vy::Matrix, P::Matrix, B::Int)
 
     rho .= M ./ vol                                                  # density of cell
     vx  .= Px ./ M                                                   # speed along x
     vy  .= Py ./ M                                                   # speed along y
     P   .= (E ./ vol .- 0.5 .* rho .* (vx .^2 .+ vy .^2)) .* (g-1)   # Pressure
+
+    if B == 1
+        # Bound cells on top and bottom
+        rho[1, :] .= rho[2, :]
+        vx[ 1, :] .=  vx[2, :]
+        vy[ 1, :] .= -vy[2, :]
+        P[  1, :] .=   P[2, :]
+
+        rho[end, :] .= rho[end-1, :]
+        vx[ end, :] .=  vx[end-1, :]
+        vy[ end, :] .= -vy[end-1, :]
+        P[  end, :] .=   P[end-1, :]
+    end
 
 end
 
@@ -102,10 +115,16 @@ fx : matrix
 fy : matrix
     df/dy
 """
-function grad(f::Matrix, dx::Float64, fx::Matrix, fy::Matrix)
+function grad(f::Matrix, dx::Float64, fx::Matrix, fy::Matrix, B::Int)
 
     fx .= (circshift(f, (0, -1)) .- circshift(f, (0, 1))) ./ (2*dx)
     fy .= (circshift(f, (-1, 0)) .- circshift(f, (1, 0))) ./ (2*dx)
+
+    if B == 1
+        # Bound cells on top and bottom
+        fy[1, :  ] .= -fy[2, :    ]
+        fy[end, :] .= -fy[end-1,:]
+	end
 
 end
 
@@ -163,7 +182,7 @@ end
 #========================================================================================#
 
 @doc raw"""
-Function to compute fluxes; Euler equations as coservatives laws
+Function to compute fluxes; we use Rusanov method.
 You must pass also the matrices that will contain the output.
 
 Parameters
@@ -213,6 +232,7 @@ function Flux(rho_L::Matrix, rho_R::Matrix, v1_L::Matrix, v1_R::Matrix, v2_L::Ma
     # find wavespeeds
     C_L = sqrt.(g .* P_L ./ rho_L) .+ abs.(v1_L)
     C_R = sqrt.(g .* P_R ./ rho_R) .+ abs.(v1_R)
+    # C_L if C_L .>= C_R is true, otherwise C_R
     C   = ifelse.(C_L .>= C_R, C_L, C_R)
 
     # add stabilizing diffusive term
@@ -320,55 +340,95 @@ function main()
 
     #============ Simulation parameters ============#
 
-    N = 100  # Number of points
+    N = 200  # Number of points
     L = 1    # Size of box
     g = 5/3  # Ideal gas gamma
-    t = 3    # Time of simulation
+    t = 5    # Time of simulation
     s = 20   # Frame rate for animation in unit of dt
+    G = -1   # Gravity
+    B = 1    # Flag for bound on top ad bottom must be 1 if G != 0
 
     #============= Saving data on file =============#
 
     #===============================================
     Each file contains the temporal evolution of a
-    quantity. Therefore it is recommended to delete
-    any previous files to avoid additions to the old
-    file. Can be read by anim_plot.py
+    quantity. First we open the file with the
+    permission to write to erase what has been written,
+    then with permission to append to save the data.
+    We use anim_plot.py to read them ad made plot
     ===============================================#
-    file1 = open("data_rho.txt", "a") # To save data
-    file2 = open("data_vx.txt",  "a") # To save data
-    file3 = open("data_vy.txt",  "a") # To save data
-    file4 = open("data_P.txt",   "a") # To save data
+
+    name = "om"
+
+    file1 = open("data_rho_$name.txt", "w"); close(file1)
+    file2 = open("data_vx_$name.txt",  "w"); close(file2)
+    file3 = open("data_vy_$name.txt",  "w"); close(file3)
+    file4 = open("data_P_$name.txt",   "w"); close(file4)
+
+    file1 = open("data_rho_$name.txt", "a") # To save data
+    file2 = open("data_vx_$name.txt",  "a") # To save data
+    file3 = open("data_vy_$name.txt",  "a") # To save data
+    file4 = open("data_P_$name.txt",   "a") # To save data
 
     #================ Mesh creation ================#
 
     dx   = L/N    # step
     vol  = dx^2   # cell volume
     x    = [0.5*dx + i*(L-dx)/(N-1) for i in 0:N-1]
-    X, Y = meshgrid(x, x) # grid
+    X, Y = meshgrid(x, x) # square grid
 
     #============== Initial conditions =============#
 
     #= For Kelvin–Helmholtz instability
     Two fluid with different speed and rho:
+
     1   1   1   1   1   1    vx = -0.5  <-
     1   1   1   1   1   1               <-
-    ---------------------
     2   2   2   2   2   2    vx = +0.5  ->
     2   2   2   2   2   2               ->
-    ---------------------
     1   1   1   1   1   1    vx = -0.5  <-
     1   1   1   1   1   1               <-
     =#
 
-    sigma = 0.05     # Sigma for vy pertubation
-    rho   = 1.   .+ (abs.(Y .- 0.5) .< 0.25) # Two different densities
-    vx    = -0.5 .+ (abs.(Y .- 0.5) .< 0.25) # Two diffetente speed
-    vy    = 0.1 .* sin.(4*pi .* X) .* (exp.( .- (Y .- 0.25) .^2 ./ (sigma^2)) .+ exp.( .- ( Y .- 0.75) .^2 ./(sigma^2)))
-    P     = 2.5 * ones(N, N) # Initialize pressure
+    #sigma = 0.05     # Sigma for vy pertubation
+    #rho   = 1.   .+ (abs.(Y .- 0.5) .< 0.25) # Two different densities
+    #vx    = -0.5 .+ (abs.(Y .- 0.5) .< 0.25) # Two diffetent speeds
+    #vy    = 0.1 .* sin.(4*pi .* X) .* (exp.( .- (Y .- 0.25) .^2 ./ (sigma^2)) .+ exp.( .- ( Y .- 0.75) .^2 ./(sigma^2)))
+    #P     = 2.5 * ones(N, N) # Initialize pressure
+
+    #***********************************************#
+
+    #= For Rayleigh-Taylor instability
+    Two fluid with different rho:
+    ---------
+    2   2   2
+    2   2   2    | G
+    2   2   2    V
+    1   1   1
+    1   1   1
+    1   1   1
+    ---------
+    =#
+
+    rho = 1. .+ (Y .> 0.5) # Two different densities
+    vx  = zeros(N, N)      # No velocity along x
+    vy  = 0.0025 .* (1 .- cos.(2*pi .* X)) .* (1 .- cos.(2*pi .* Y ))
+    P   = 2.5 .+ G .* (Y .- 0.5) .* rho # Initialize pressure
+
+    #==============================================#
+    #====== Add bound cells to craete a wall ======#
+
+    K = N # If we not specify we have squared matrices
+    if B == 1
+        rho = vcat(rho[1, :]', rho, rho[end, :]')
+        vx  = vcat(vx[ 1, :]',  vx,  vx[end, :]')
+        vy  = vcat(vy[ 1, :]',  vy,  vy[end, :]')
+        P   = vcat(P[  1, :]',   P,   P[end, :]')
+        K   = N + 2 # else we must consider bound cells
+    end
 
     # Compute conserved quatities
-    M, Px, Py, E  = zeros(N, N), zeros(N, N), zeros(N, N), zeros(N, N)
-
+    M, Px, Py, E  = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
     evol_quantities(rho, vx, vy, P, g, vol, M, Px, Py, E)
 
     #============== Auxiliar matrix ===============#
@@ -381,26 +441,26 @@ function main()
     ===============================================#
 
     # For the gradient
-    drho_x, drho_y = zeros(N, N), zeros(N, N)
-    dvx_x,  dvx_y  = zeros(N, N), zeros(N, N)
-    dvy_x,  dvy_y  = zeros(N, N), zeros(N, N)
-    dP_x,   dP_y   = zeros(N, N), zeros(N, N)
+    drho_x, drho_y = zeros(K, N), zeros(K, N)
+    dvx_x,  dvx_y  = zeros(K, N), zeros(K, N)
+    dvy_x,  dvy_y  = zeros(K, N), zeros(K, N)
+    dP_x,   dP_y   = zeros(K, N), zeros(K, N)
 
     # For first update
-    rho_new = zeros(N, N)
-    vx_new  = zeros(N, N)
-    vy_new  = zeros(N, N)
-    P_new   = zeros(N, N)
+    rho_new = zeros(K, N)
+    vx_new  = zeros(K, N)
+    vy_new  = zeros(K, N)
+    P_new   = zeros(K, N)
 
     # For edge extrapolation
-    rho_xL, rho_xR, rho_yL, rho_yR = zeros(N, N), zeros(N, N), zeros(N, N), zeros(N, N)
-    vx_xL,  vx_xR,  vx_yL,  vx_yR  = zeros(N, N), zeros(N, N), zeros(N, N), zeros(N, N)
-    vy_xL,  vy_xR,  vy_yL,  vy_yR  = zeros(N, N), zeros(N, N), zeros(N, N), zeros(N, N)
-    P_xL,   P_xR,   P_yL,   P_yR   = zeros(N, N), zeros(N, N), zeros(N, N), zeros(N, N)
+    rho_xL, rho_xR, rho_yL, rho_yR = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
+    vx_xL,  vx_xR,  vx_yL,  vx_yR  = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
+    vy_xL,  vy_xR,  vy_yL,  vy_yR  = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
+    P_xL,   P_xR,   P_yL,   P_yR   = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
 
     # For flux
-    flux_M_X, flux_Px_X, flux_Py_X, flux_E_X = zeros(N, N), zeros(N, N), zeros(N, N), zeros(N, N)
-    flux_M_Y, flux_Py_Y, flux_Px_Y, flux_E_Y = zeros(N, N), zeros(N, N), zeros(N, N), zeros(N, N)
+    flux_M_X, flux_Px_X, flux_Py_X, flux_E_X = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
+    flux_M_Y, flux_Py_Y, flux_Px_Y, flux_E_Y = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
 
     #================= Simulation =================#
 
@@ -410,17 +470,25 @@ function main()
     while time <= t
 
         # Return to initial quantities
-        old_quantities(M, Px, Py, E, g, vol, rho, vx, vy, P)
+        old_quantities(M, Px, Py, E, g, vol, rho, vx, vy, P, B)
 
         # Time step from Courant–Friedrichs–Lewy (CFL) = dx / max signal speed
         # sqrt.( g .* P ./ rho ) is the sound of speed for ideal gas
         dt = 0.4 * minimum( dx ./ (sqrt.( g .* P ./ rho ) .+ sqrt.(vx .^2 .+ vy .^2)))
 
+        if B == 1
+            # Add source term
+            E  .+= 0.5 .* dt .* Py .* G
+            Py .+= 0.5 .* dt .* M  .* G
+
+            old_quantities(M, Px, Py, E, g, vol, rho, vx, vy, P, B)
+        end
+
         # compute gradients
-        grad(rho, dx, drho_x, drho_y)
-        grad(vx,  dx, dvx_x,  dvx_y)
-        grad(vy,  dx, dvy_x,  dvy_y)
-        grad(P,   dx, dP_x,   dP_y)
+        grad(rho, dx, drho_x, drho_y, B)
+        grad(vx,  dx, dvx_x,  dvx_y,  B)
+        grad(vy,  dx, dvy_x,  dvy_y,  B)
+        grad(P,   dx, dP_x,   dP_y,   B)
 
         # half-step in time, the first three equations when put together give the Euler equation
         rho_new = rho .- 0.5*dt .* ( vx .* drho_x .+ rho .* dvx_x .+ vy .* drho_y .+ rho .* dvy_y) # Conservation of particle number
@@ -461,12 +529,17 @@ function main()
         Flux(rho_xL, rho_xR, vx_xL, vx_xR, vy_xL, vy_xR, P_xL, P_xR, g, flux_M_X, flux_Px_X, flux_Py_X, flux_E_X)
         Flux(rho_yL, rho_yR, vy_yL, vy_yR, vx_yL, vx_yR, P_yL, P_yR, g, flux_M_Y, flux_Py_Y, flux_Px_Y, flux_E_Y)
 
-        # update solution
+        # Update solution
         update(M,  flux_M_X,  flux_M_Y,  dx, dt)
         update(Px, flux_Px_X, flux_Px_Y, dx, dt)
         update(Py, flux_Py_X, flux_Py_Y, dx, dt)
         update(E,  flux_E_X,  flux_E_Y,  dx, dt)
 
+        if B == 1
+            # Add source term
+            E  .+= 0.5 .* dt .* Py .* G
+            Py .+= 0.5 .* dt .* M  .* G
+        end
         # update time
         time += dt
 
@@ -483,7 +556,12 @@ function main()
         end
     end
     println()
-    print("Total iteration: $count \n")
+    print("Total iteration: $(count*s) \n")
+
+    close(file1)
+    close(file2)
+    close(file3)
+    close(file4)
 end
 
 @time main()
