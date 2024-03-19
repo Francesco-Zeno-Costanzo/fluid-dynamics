@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, writers
 
 
-def show_anim(field, save=False, name='anim', ext='.gif'):
+def show_anim(field, save=False, name='anim', ext='.gif', title=''):
     '''
     Function that takes as input a list of matrices
     (which are the temporal states of the system)
@@ -27,13 +27,13 @@ def show_anim(field, save=False, name='anim', ext='.gif'):
     '''
     
     fig = plt.figure(figsize=(7, 7))
-    plt.title('Kelvin–Helmholtz instability', fontsize=15)
+    plt.title(title, fontsize=15)
     ax  = plt.gca()
     ax.set_aspect('equal')
     ax.get_xaxis().set_visible(False)
     ax.get_yaxis().set_visible(False)
     
-    F = plt.imshow(field[0], origin='lower', 
+    F = plt.imshow(field[0], origin='lower',
                    norm=plt.Normalize(np.min(field[0]), np.max(field[0])),
                    cmap=plt.get_cmap('plasma'))
     plt.colorbar(F)
@@ -53,13 +53,13 @@ def show_anim(field, save=False, name='anim', ext='.gif'):
         if ext == '.mp4':
             # setting up wrtiers object
             Writer = writers['ffmpeg']
-            writer = Writer(fps=30, bitrate=1800) 
+            writer = Writer(fps=30, bitrate=1800)
             anim.save(name+ext, writer)
             
     plt.show()
 
 
-def plot(field, vx, vy):
+def plot(field, vx, vy, title=''):
     '''
     Function for plot scalar (rho or p) and velocity field together
      
@@ -72,7 +72,7 @@ def plot(field, vx, vy):
     '''
     
     fig = plt.figure(figsize=(7, 7))
-    plt.title('Kelvin–Helmholtz instability', fontsize=15)
+    plt.title(title, fontsize=15)
     ax  = plt.gca()
     ax.set_aspect('equal')
     ax.get_xaxis().set_visible(False)
@@ -93,27 +93,29 @@ def plot(field, vx, vy):
 # Read data
 #====================================================================   
 
+
+name = "om"
 print("read first")
-RHO = np.loadtxt("data_rho.txt")
+RHO = np.loadtxt(f"data_rho_{name}.txt")
 
 print("read second")
-VX  = np.loadtxt("data_vx.txt")
+VX  = np.loadtxt(f"data_vx_{name}.txt")
 
 print("read third")
-VY  = np.loadtxt("data_vy.txt")
+VY  = np.loadtxt(f"data_vy_{name}.txt")
 
 print("read fourth")
-P  = np.loadtxt("data_P.txt")
+P  = np.loadtxt(f"data_P_{name}.txt")
 
 M, N = RHO.shape
 
-rho = [RHO[i*N:(i+1)*N, :] for i in range(M//N + 1)]; rho.pop()
-vx  = [ VX[i*N:(i+1)*N, :] for i in range(M//N + 1)]; vx.pop()
-vy  = [ VY[i*N:(i+1)*N, :] for i in range(M//N + 1)]; vy.pop()
-p   = [  P[i*N:(i+1)*N, :] for i in range(M//N + 1)]; p.pop()
+k = N if M % N == 0 else N + 2
+rho = [RHO[i*k:(i+1)*k, :] for i in range(M//k + 1)]; rho.pop()
+vx  = [ VX[i*k:(i+1)*k, :] for i in range(M//k + 1)]; vx.pop()
+vy  = [ VY[i*k:(i+1)*k, :] for i in range(M//k + 1)]; vy.pop()
+p   = [  P[i*k:(i+1)*k, :] for i in range(M//k + 1)]; p.pop()
 
-tot = len(rho)
-k_p = tot - 1
-show_anim(rho)#,  save=1, name='kh', ext='.mp4')
+k_p = len(rho) - 1
+show_anim(rho, title='Rayleigh-Taylor instability')#,  save=1, name='rh')#, ext='.mp4')
 
-plot(rho[k_p], vx[k_p], vy[k_p])	
+plot(rho[k_p], vx[k_p], vy[k_p], title='Rayleigh-Taylor instability')
