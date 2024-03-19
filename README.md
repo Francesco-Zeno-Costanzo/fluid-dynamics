@@ -6,3 +6,5 @@ simple code about fluid dynamics
 
 
 ![](plot/kh.gif)
+
+![](plot/rt.gif)
