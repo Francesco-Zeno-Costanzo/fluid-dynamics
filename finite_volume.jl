@@ -131,7 +131,44 @@ end
 #========================================================================================#
 
 @doc raw"""
-Function to obtain from the value on the node the values ​​on the cell border
+Apply slope limiter.
+The idea is to compare the current derivative with the finite differences
+between adjacent cells, applying a restriction that prevents the derivative
+from becoming too large or too small.  max.(0., min.(1, (...))) *fx is used
+to have factor between 0 and 1 that multiply fx.
+1.0e-8 is for avoiding zero division error.
+
+Parameters
+----------
+f : matrix
+    function sampled on a grid
+dx : float
+    grid spacing
+fx : matrix
+    df/dx
+fy : matrix
+    df/dy
+
+Output
+------
+fx : matrix
+    limited df/dx
+fy : matrix
+    limited df/dy
+"""
+function slope_limit(f::Matrix, dx::Float64, fx::Matrix, fy::Matrix)
+
+    fx .= max.(0., min.(1., ( (f - circshift(f, (0,  1))) ./ dx) ./ (fx .+ 1.0e-8 .* (fx .== 0)))) .* fx
+    fx .= max.(0., min.(1., (-(f - circshift(f, (0, -1))) ./ dx) ./ (fx .+ 1.0e-8 .* (fx .== 0)))) .* fx
+    fy .= max.(0., min.(1., ( (f - circshift(f, (1,  0))) ./ dx) ./ (fy .+ 1.0e-8 .* (fy .== 0)))) .* fy
+    fy .= max.(0., min.(1., (-(f - circshift(f, (-1, 0))) ./ dx) ./ (fy .+ 1.0e-8 .* (fy .== 0)))) .* fy
+    
+end
+
+#========================================================================================#
+
+@doc raw"""
+Function to obtain from the value on the node the values on the cell border
 
   |     |     |
 --o-----o-----o--
@@ -139,7 +176,7 @@ Function to obtain from the value on the node the values ​​on the cell borde
   |  |  |  |  |      f_L = f - df/dx * dx/2
 --o-----o-----o--    We do this for all directions and then, using circshift
   |  |  |  |  |      we make a translation to the left and down.
-  |   --|--   |      We then finally obtain the values ​​on the initial edges
+  |   --|--   |      We then finally obtain the values on the initial edges
 --o-----o-----o--
   |     |     |
 
@@ -301,7 +338,7 @@ Example
 julia> x = [1, 2, 3, 4, 5];
 julia> gx, gy, = meshgrid(x, x);
 julia> gx
-5×5 Matrix{Float64}:
+5x5 Matrix{Float64}:
  1.0  2.0  3.0  4.0  5.0
  1.0  2.0  3.0  4.0  5.0
  1.0  2.0  3.0  4.0  5.0
@@ -309,7 +346,7 @@ julia> gx
  1.0  2.0  3.0  4.0  5.0
 
 julia> gy
-5×5 Matrix{Float64}:
+5x5 Matrix{Float64}:
  1.0  1.0  1.0  1.0  1.0
  2.0  2.0  2.0  2.0  2.0
  3.0  3.0  3.0  3.0  3.0
@@ -340,13 +377,14 @@ function main()
 
     #============ Simulation parameters ============#
 
-    N = 200  # Number of points
-    L = 1    # Size of box
-    g = 5/3  # Ideal gas gamma
-    t = 5    # Time of simulation
-    s = 20   # Frame rate for animation in unit of dt
-    G = -1   # Gravity
-    B = 1    # Flag for bound on top ad bottom must be 1 if G != 0
+    N  = 200  # Number of points
+    L  = 1    # Size of box
+    g  = 5/3  # Ideal gas gamma
+    t  = 3    # Time of simulation
+    s  = 20   # Frame rate for animation in unit of dt
+    G  = 0    # Gravity
+    B  = 0    # Flag for bound on top ad bottom must be 1 if G != 0
+    sl = 0    # Flag for splope limiting
 
     #============= Saving data on file =============#
 
@@ -390,11 +428,11 @@ function main()
     1   1   1   1   1   1               <-
     =#
 
-    #sigma = 0.05     # Sigma for vy pertubation
-    #rho   = 1.   .+ (abs.(Y .- 0.5) .< 0.25) # Two different densities
-    #vx    = -0.5 .+ (abs.(Y .- 0.5) .< 0.25) # Two diffetent speeds
-    #vy    = 0.1 .* sin.(4*pi .* X) .* (exp.( .- (Y .- 0.25) .^2 ./ (sigma^2)) .+ exp.( .- ( Y .- 0.75) .^2 ./(sigma^2)))
-    #P     = 2.5 * ones(N, N) # Initialize pressure
+    sigma = 0.05     # Sigma for vy pertubation
+    rho   = 1.   .+ (abs.(Y .- 0.5) .< 0.25) # Two different densities
+    vx    = -0.5 .+ (abs.(Y .- 0.5) .< 0.25) # Two diffetent speeds
+    vy    = 0.1 .* sin.(4*pi .* X) .* (exp.( .- (Y .- 0.25) .^2 ./ (sigma^2)) .+ exp.( .- ( Y .- 0.75) .^2 ./(sigma^2)))
+    P     = 2.5 * ones(N, N) # Initialize pressure
 
     #***********************************************#
 
@@ -410,10 +448,10 @@ function main()
     ---------
     =#
 
-    rho = 1. .+ (Y .> 0.5) # Two different densities
-    vx  = zeros(N, N)      # No velocity along x
-    vy  = 0.0025 .* (1 .- cos.(2*pi .* X)) .* (1 .- cos.(2*pi .* Y ))
-    P   = 2.5 .+ G .* (Y .- 0.5) .* rho # Initialize pressure
+    #rho = 1. .+ (Y .> 0.5) # Two different densities
+    #vx  = zeros(N, N)      # No velocity along x
+    #vy  = 0.0025 .* (1 .- cos.(2*pi .* X)) .* (1 .- cos.(2*pi .* Y ))
+    #P   = 2.5 .+ G .* (Y .- 0.5) .* rho # Initialize pressure
 
     #==============================================#
     #====== Add bound cells to craete a wall ======#
@@ -426,7 +464,7 @@ function main()
         P   = vcat(P[  1, :]',   P,   P[end, :]')
         K   = N + 2 # else we must consider bound cells
     end
-
+    
     # Compute conserved quatities
     M, Px, Py, E  = zeros(K, N), zeros(K, N), zeros(K, N), zeros(K, N)
     evol_quantities(rho, vx, vy, P, g, vol, M, Px, Py, E)
@@ -489,12 +527,19 @@ function main()
         grad(vx,  dx, dvx_x,  dvx_y,  B)
         grad(vy,  dx, dvy_x,  dvy_y,  B)
         grad(P,   dx, dP_x,   dP_y,   B)
-
+        
+        if sl == 1
+            slope_limit(rho, dx, drho_x, drho_y)
+            slope_limit(vx , dx, dvx_x,  dvx_y )
+            slope_limit(vy , dx, dvy_x,  dvy_y )
+            slope_limit(P  , dx, dP_x,   dP_y  )
+        end
+        
         # half-step in time, the first three equations when put together give the Euler equation
         rho_new = rho .- 0.5*dt .* ( vx .* drho_x .+ rho .* dvx_x .+ vy .* drho_y .+ rho .* dvy_y) # Conservation of particle number
         vx_new  = vx  .- 0.5*dt .* ( vx .* dvx_x  .+ vy  .* dvx_y .+ (1 ./rho) .* dP_x )           # Euler equation for vx
         vy_new  = vy  .- 0.5*dt .* ( vx .* dvy_x  .+ vy  .* dvy_y .+ (1 ./rho) .* dP_y )           # Euler equation for vy
-        P_new   = P   .- 0.5*dt .* ( g .* P .* (dvx_x .+ dvy_y)  .+ vx .* dP_x .+ vy .* dP_y )     # Conservation of energy
+        P_new   = P   .- 0.5*dt .* ( g .* P .* (dvx_x .+ dvy_y)   .+ vx .* dP_x .+ vy .* dP_y )     # Conservation of energy
 
         # Extrapolation to get the values ​​on the cell edges
         extrapolate(rho_new, drho_x, drho_y, dx, rho_xL, rho_xR, rho_yL, rho_yR)

@@ -119,3 +119,5 @@ k_p = len(rho) - 1
 show_anim(rho, title='Rayleigh-Taylor instability')#,  save=1, name='rh')#, ext='.mp4')
 
 plot(rho[k_p], vx[k_p], vy[k_p], title='Rayleigh-Taylor instability')
+plot(  p[k_p], vx[k_p], vy[k_p], title='Rayleigh-Taylor instability')
+
